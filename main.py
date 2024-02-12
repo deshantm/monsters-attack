@@ -236,12 +236,11 @@ def reset_or_populate_enemies(enemies, level, populate_new_level=False):
         # Completely clear the enemies list for a fresh start
         enemies.clear()
 
-
         if level == 7:
             # Create the special spider enemy for level 7
             x = random.randint(0, screen.get_width() - 400)
             y = random.randint(0, screen.get_height() - 400)
-            spider = Enemy(x, y, 100, spider_image, spider_dead_image, None, is_spider=True)
+            spider = Enemy(x, y, 1000, spider_image, spider_dead_image, None, is_spider=True)
             enemies.append(spider)
         else: # Populate regular enemies for other levels
 
@@ -374,12 +373,18 @@ class AIHelper(Player):
             if enemy.dead:
                 enemies.remove(enemy)
         if enemies:
-            nearest_enemy = min(enemies, key=lambda enemy: (enemy.x - self.x) ** 2 + (enemy.y - self.y) ** 2)
-            dx, dy = nearest_enemy.x - self.x, nearest_enemy.y - self.y
-            distance = max(abs(dx), abs(dy))
-            if distance != 0:
-                self.x += (dx / distance) * 2  # Adjust speed as needed
-                self.y += (dy / distance) * 2
+            for enemy in enemies:
+                x = enemy.x
+                if x < self.x:
+                    self.x -= 2
+                elif x > self.x:
+                    self.x += 2
+                # if reaches the other side, go back
+                if self.x < 0:
+                    self.x = 0
+                elif self.x > screen.get_width() - self.image.get_width():
+                    self.x = screen.get_width() - self.image.get_width()
+                
 
     def shoot(self, enemies, screen):
         # Example: Shoot a laser towards the nearest enemy
@@ -437,10 +442,18 @@ while running:
     # Within the game setup for level 2 or higher
 
     ai_x_position = random.randint(0, screen.get_width() - 100)
-    ai_y_position = random.randint(0, screen.get_height() - 100)
-
+    #y position is bottom of the screen
+    ai_y_position = screen.get_height() - 100
     
-
+    if level == 8:
+            # display mission completed
+            font = pygame.font.Font(None, 36)
+            text = font.render(f"Mission Completed", True, (0, 0, 0))
+            screen.blit(text, (width // 2, height // 2))
+            pygame.display.update()
+            time.sleep(3)
+            level = 1
+            continue
 
 
     # Display level selection or gameplay based on level value
