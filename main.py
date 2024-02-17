@@ -1,6 +1,7 @@
 import pygame
 import random
 import time
+import os
 
 # Initialize the game
 pygame.init()
@@ -41,6 +42,73 @@ spider_image = pygame.transform.scale(pygame.image.load("spider.webp"), (400, 40
 spider_dead_image = pygame.transform.scale(spider_image, (400, 100))  # Example dead image scaling
 
 
+
+
+class Boss:
+    def __init__(self, image, position):
+        self.image = pygame.transform.scale(image, (100, 100))  # Adjust size as needed
+        self.rect = self.image.get_rect()
+        self.rect.topleft = position
+        self.health = 100  # Example attribute
+        self.max_health = 100  # Maximum health
+        self.speed = 0.5  # Boss speed, adjust as needed
+        self.defeated = False  # add a defeated flag
+
+        # New attributes for internal position tracking with floating-point precision
+        self.pos_x = float(position[0])
+        self.pos_y = float(position[1])
+
+    def take_damage(self, damage):
+        self.health -= damage
+        if self.health <= 0:
+            self.health = 0
+            self.defeated = True 
+            #set the image to dead/flat image
+            self.image = pygame.transform.scale(self.image, (100, 10))  # Example scaling for dead image
+
+    def draw(self, surface):
+        surface.blit(self.image, self.rect)
+        self.draw_health_bar(surface)
+
+    def draw_health_bar(self, surface):
+        bar_position = (self.rect.x, self.rect.y - 10)
+        bar_size = (self.rect.width, 10)
+        health_ratio = self.health / self.max_health
+        pygame.draw.rect(surface, (255, 0, 0), (bar_position, (bar_size[0] * health_ratio, bar_size[1])))
+
+    def update(self, player):
+        if self.health > 0:
+            self.chase_player(player.x, player.y)
+            self.attack_player(player)
+            # Update the rect position based on the internal floating-point tracking
+            self.rect.x = int(self.pos_x)
+            self.rect.y = int(self.pos_y)
+
+    def chase_player(self, player_x, player_y):
+        # Calculate direction vector towards the player
+        dir_x = player_x - self.pos_x
+        dir_y = player_y - self.pos_y
+
+        # Normalize direction vector (if not zero) to ensure consistent speed
+        distance = (dir_x**2 + dir_y**2)**0.5
+        if distance > 0:
+            dir_x /= distance
+            dir_y /= distance
+
+            # Accumulate the movement with floating-point precision
+            self.pos_x += dir_x * self.speed
+            self.pos_y += dir_y * self.speed
+
+        print("chasing", self.pos_x, self.pos_y, player_x, player_y)
+
+    def attack_player(self, player):
+        # Define a simple attack hitbox around the boss
+        attack_rect = pygame.Rect(self.rect.x - 10, self.rect.y - 10, self.rect.width + 20, self.rect.height + 20)
+        player_rect = pygame.Rect(player.x, player.y, player.image.get_width(), player.image.get_height())
+
+        # Check for collision with the player
+        if attack_rect.colliderect(player_rect):
+            player.hit()  # Assume hit() reduces the player's health and handles death
 
 
 
@@ -165,6 +233,15 @@ ghost_arm_image = pygame.transform.scale(pygame.image.load("ghost-arm.jpg"), (50
 pumpkin_arm_image = pygame.transform.scale(pygame.image.load("pumpkin-arm.jpg"), (50, 50))
 skeleton_arm_image = pygame.transform.scale(pygame.image.load("skeleton-arm.jpg"), (50, 50))
 
+# Assuming boss_images is a dictionary where keys are level numbers
+boss_images = {}
+boss_filenames = ['boss-1.jpeg', 'boss-2.jpeg', 'boss-3.png', 'boss-4.png', 'boss-5.jpeg', 'boss-6.jpeg', 'boss-7.jpeg']
+for i, filename in enumerate(boss_filenames, start=1):  # Start at level 1
+    try:
+        image_path = os.path.join(filename)  # Adjust path as necessary
+        boss_images[i] = pygame.image.load(image_path)
+    except pygame.error as e:
+        print(f"Error loading boss image {filename}: {e}")
 
 
 #random zombie locations
@@ -205,6 +282,9 @@ for i in range(5):
     x = random.randint(0, screen.get_width() - 100)
     y = random.randint(0, screen.get_height() - 100)
     skeleton_locations.append((x, y))
+
+
+all_bosses = []  # List to keep track of all bosses, including defeated ones
 
 
 # Create enemies
@@ -415,7 +495,7 @@ ai_helpers = []
 player = Player(screen.get_width() / 2, screen.get_height() - laser_image.get_height(), 5, laser_image, laser_dead_image)
 
 
-
+boss = None
 
 # Set the game loop
 running = True
@@ -477,16 +557,25 @@ while running:
         
         for enemy in enemies:  # Draw enemies
             enemy.draw(screen)
-        
+
+        for boss in all_bosses:
+            if not boss.defeated:
+                boss.update(player)  # Update only if the boss is not defeated
+            boss.draw(screen)  # Draw every boss, including defeated ones
+
         player.draw(screen)  # Draw the player
 
         # Inside the game loop, after drawing everything
         player.draw_health_bar(screen)
 
+
         # Update and draw AI helpers
         for ai_helper in ai_helpers:
             ai_helper.update(enemies, screen)
             ai_helper.draw(screen)
+
+
+
 
     # Event handling loop
     for event in pygame.event.get():
@@ -511,6 +600,10 @@ while running:
             print("Shoot laser")
             # Assuming the player's laser starts from the middle of the player image
             laser_start = (player.x + player.image.get_width() // 2, player.y)
+
+            # Check collision with the boss
+            if boss and boss.rect.collidepoint(laser_target):
+                boss.take_damage(10)  # Example damage value
             
             # Hit detection
             for enemy in enemies:
@@ -529,9 +622,21 @@ while running:
             enemy.move_towards_player(player)
             enemy.attack_player(player)
 
+    if all(enemy.dead for enemy in enemies) and level >= 2 and level <= 7:
+    # This condition ensures a new boss is spawned for levels 2 to 7
+
+        # Check if the boss for the next level has already been spawned
+        if not any(boss.level == level for boss in all_bosses):
+            boss_image = boss_images[level]  # Get the boss image for the current level
+            boss_position = (400, 300)  # Example position
+            new_boss = Boss(boss_image, boss_position)
+            new_boss.level = level  # Track the level of the boss for identification
+            all_bosses.append(new_boss)  # Add the new boss to the list
+
+
 
     # Inside the game loop, after updating and drawing everything
-    if level > 0 and all(enemy.dead for enemy in enemies):
+    if level > 0 and all(enemy.dead for enemy in enemies) and all(boss.defeated for boss in all_bosses if boss.level == level):
         level += 1  # Increment the level
         reset_or_populate_enemies(enemies, level, populate_new_level=True)  # Populate new level with enemies
 
