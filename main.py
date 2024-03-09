@@ -1,7 +1,11 @@
+#Monster Attack
 import pygame
 import random
 import time
 import os
+import time
+
+
 
 # Initialize the game
 pygame.init()
@@ -18,6 +22,9 @@ pygame.display.set_caption("Monster Attack")
 # Set the background color
 screen.fill((255, 255, 255))
 
+isLevelXA = False
+isLevelXB = True
+level = 8
 
 #load level images
 level_images = []
@@ -41,6 +48,19 @@ laser_dead_image = pygame.transform.scale(laser_image, (50, 10))  # Example scal
 spider_image = pygame.transform.scale(pygame.image.load("spider.webp"), (400, 400))
 spider_dead_image = pygame.transform.scale(spider_image, (400, 100))  # Example dead image scaling
 
+
+
+# Load "The Dark Master" parts
+dark_master_parts = {
+    "tail": pygame.image.load("tail.webp"),
+    "chain": pygame.image.load("chain.webp"),
+    "head": pygame.image.load("head.webp"),
+    "body": pygame.image.load("body.webp"),
+    "leg": pygame.image.load("leg.webp"),
+    "head_with_red_eyes": pygame.image.load("head-with-red-eyes.webp"),
+    "feet": pygame.image.load("feet.webp"),
+    "crystal": pygame.image.load("crystal.webp")
+}
 
 
 
@@ -112,6 +132,161 @@ class Boss:
 
 
 
+class TheDarkMaster():
+    def __init__(self, parts, position):
+        self.parts = parts
+        self.attack_timer = 0
+        self.attacking = False
+        self.assembled_image = self.assemble_parts(parts)
+        self.rect = self.assembled_image.get_rect()
+        self.rect.topleft = position
+        self.health = 1000
+        self.speed = 1
+        self.pos_x = float(position[0])
+        self.pos_y = float(position[1])
+        self.defeated = False
+        
+
+
+        self.zoom_dive_cooldown = 0
+        self.is_zoom_diving = False
+        self.level = 8
+        
+    def assemble_parts(self, parts):
+        # Create a new surface for the assembled image with enough space and transparency
+        assembled_surface = pygame.Surface((800, 1200), pygame.SRCALPHA)  # Adjust the size as needed to fit all parts
+
+        #scale the parts
+        for part in parts:
+            parts[part] = pygame.transform.scale(parts[part], (100, 100))
+
+
+
+        # Central piece: Body. We place it near the center of our surface
+        body_pos = (300 - parts['body'].get_width() // 2, 500 - parts['body'].get_height() // 2)
+        assembled_surface.blit(parts['body'], body_pos)
+        screen.blit(assembled_surface, (0, 0))
+
+        
+        # Head on top of the body
+        #if attacking, use the head with red eyes
+        if self.attacking:
+            #print("attacking")
+            head_pos = (body_pos[0] + (parts['body'].get_width() - parts['head_with_red_eyes'].get_width()) // 2, body_pos[1] - parts['head_with_red_eyes'].get_height())
+            assembled_surface.blit(parts['head_with_red_eyes'], head_pos)
+        else:
+            #print("not attacking")
+            head_pos = (body_pos[0] + (parts['body'].get_width() - parts['head'].get_width()) // 2, body_pos[1] - parts['head'].get_height())
+            assembled_surface.blit(parts['head'], head_pos)
+        
+        # Feet at the bottom of the body
+        feet_pos = (body_pos[0] + (parts['body'].get_width() - parts['feet'].get_width()) // 2, body_pos[1] + parts['body'].get_height())
+        assembled_surface.blit(parts['feet'], feet_pos)
+        
+        # Tail to the left side of the body
+        tail_pos = (body_pos[0] - parts['tail'].get_width(), body_pos[1] + (parts['body'].get_height() - parts['tail'].get_height()) // 2)
+        assembled_surface.blit(parts['tail'], tail_pos)
+        
+        # Chain to the left side of the tail
+        # make sure it is on the left side of the tail
+        chain_pos = (tail_pos[0] - parts['chain'].get_width(), body_pos[1] + (parts['body'].get_height() - parts['chain'].get_height()) // 2)
+        assembled_surface.blit(parts['chain'], chain_pos)
+        
+        #put the crytal under the chain
+        crystal_pos = (chain_pos[0] + (parts['chain'].get_width() - parts['crystal'].get_width()) // 2, chain_pos[1] + parts['chain'].get_height())
+        assembled_surface.blit(parts['crystal'], crystal_pos)
+        
+        
+        # Leg just below the body, slightly to the right
+        leg_pos = (body_pos[0] + parts['body'].get_width() // 4, body_pos[1] + parts['body'].get_height() - parts['leg'].get_height() // 2)
+        assembled_surface.blit(parts['leg'], leg_pos)
+        
+        
+        
+        return assembled_surface
+
+    def draw(self, surface):
+        if self.attacking:
+            #print("Drawing: Attacking with red eyes")  # Debugging print
+            # Update the assembled image to the "red eye" version when attacking
+            self.assembled_image = self.assemble_parts(self.parts)
+        else:
+            #print("Drawing: Not attacking, normal eyes")  # Debugging print
+            self.assembled_image = self.assemble_parts(self.parts)
+        surface.blit(self.assembled_image, self.rect)
+        self.draw_health_bar(surface)
+
+    def draw_health_bar(self, surface):
+        bar_position = (self.rect.x, self.rect.y - 10)
+        bar_size = (self.rect.width, 10)
+        health_ratio = self.health / 1000
+        pygame.draw.rect(surface, (255, 0, 0), (bar_position, (bar_size[0] * health_ratio, bar_size[1])))
+
+    def take_damage(self, damage):
+        self.health -= damage
+        if self.health <= 0:
+            self.health = 0
+            self.defeated = True
+            self.assembled_image = pygame.transform.scale(self.assembled_image, (800, 100))
+
+
+
+    def update(self, player):
+        if self.attack_timer > 0:
+            self.attack_timer -= 1
+            self.attacking = True
+            print(f"Updating: attack_timer={self.attack_timer}, attacking={self.attacking}")  # Debugging print
+        else:
+            self.attacking = False
+        
+        if self.health > 0 and not self.is_zoom_diving:
+            self.move_horizontally(player.x)
+            self.choose_action(player)
+        
+
+    def move_horizontally(self, player_x):
+        if player_x < self.pos_x:
+            self.pos_x -= self.speed
+        elif player_x > self.pos_x:
+            self.pos_x += self.speed
+        self.rect.x = int(self.pos_x)
+
+    def tail_swipe(self, player):
+        # Example logic for tail swipe, might involve animation or hit detection
+        print("Tail swipe attack")
+        self.attack_timer = 300
+        # Implement hit detection and apply damage to player if within range
+
+    def zoom_dive(self, player):
+        print("Zoom dive attack")
+        self.is_zoom_diving = True
+        self.attack_timer = 300
+        # Implement the zoom dive attack logic, moving towards the player quickly and dealing damage
+        # Reset is_zoom_diving and zoom_dive_cooldown after the attack
+
+    def choose_action(self, player):
+        print(f"Choosing action. Current zoom_dive_cooldown: {self.zoom_dive_cooldown}")  # Debug print
+
+        if self.zoom_dive_cooldown <= 0:
+            action = random.choice(["tail_swipe", "zoom_dive"])
+            print(f"Action chosen: {action}")  # Debug print
+
+            if action == "tail_swipe":
+                self.tail_swipe(player)
+                self.attacking = True
+                print("Performing tail swipe. Setting attacking to True.")  # Debug print
+            else:
+                self.zoom_dive(player)
+                self.zoom_dive_cooldown = random.randint(20, 40)  # Cooldown before next zoom dive
+                self.attacking = True  # Assuming you want to set attacking to True for zoom dive as well
+                print(f"Performing zoom dive. New zoom_dive_cooldown: {self.zoom_dive_cooldown}, Setting attacking to True.")  # Debug print
+        else:
+            self.zoom_dive_cooldown -= 1
+            self.attacking = False
+            print(f"Not attacking. Decremented zoom_dive_cooldown to: {self.zoom_dive_cooldown}, Setting attacking to False.")  # Debug print
+
+
+
 
 
 class Enemy:
@@ -134,15 +309,24 @@ class Enemy:
             dist = max(abs(dx), abs(dy))
             if dist != 0:
                 dx, dy = dx / dist, dy / dist
+                if self.is_spider:
+                
+                    print(f"[Before Movement Update] Spider Position: x={self.x}, y={self.y} Level: {level} - From: chase_player")
+                    #sleep for 3 seconds
+                    #time.sleep(3)
                 self.x += dx * .1 * level  # Slower movement rate
                 self.y += dy * .1 * level
+                if self.is_spider:
+                    print(f"[After Movement Update] Spider Position: x={self.x}, y={self.y}  Level: {level} - From: chase_player")
+                    #time.sleep(3)
+
                     
 
     def attack_player(self, player):
         # Check if close enough to attack
         
         if not self.dead and not player.dead: 
-            print("attacking", self.x, self.y, player.x, player.y, self.dead, player.dead)
+            #print("attacking", self.x, self.y, player.x, player.y, self.dead, player.dead)
             attack_distance = 50
             
             if abs(self.x - player.x) < attack_distance and abs(self.y - player.y) < attack_distance and not self.dead:
@@ -311,18 +495,28 @@ for x, y in skeleton_locations:
 
 debug = False
 
+level_7_boss_defeated = False
+spider_ready = False
+spider_already_spawned = False
+
 def reset_or_populate_enemies(enemies, level, populate_new_level=False):
+
+    global spider_already_spawned
+    
     if populate_new_level:
         # Completely clear the enemies list for a fresh start
         enemies.clear()
 
-        if level == 7:
+        if level == 7 and level_7_boss_defeated and spider_ready and not spider_already_spawned:
             # Create the special spider enemy for level 7
+    
             x = random.randint(0, screen.get_width() - 400)
             y = random.randint(0, screen.get_height() - 400)
             spider = Enemy(x, y, 1000, spider_image, spider_dead_image, None, is_spider=True)
+            print(f"Creating/Resetting Spider at Position: x={x}, y={y} - Level: {level}")
             enemies.append(spider)
-        else: # Populate regular enemies for other levels
+            spider_already_spawned = True
+        elif level < 7: # Populate regular enemies for other levels
 
             if debug:
                 num_new_enemies = 1  # Example: Keep the enemy count low for debugging
@@ -376,6 +570,12 @@ class Player:
         self.dead = False
         self.respawn_time = 5  # seconds
         self.death_timestamp = None
+        self.jumping = False
+
+    def jump(self):
+        if not self.dead and not self.jumping:
+            self.y -= 200  # Move up
+
 
     def hit(self):
         if not self.dead:
@@ -406,6 +606,7 @@ class Player:
                 self.x -= 10  # Move left
             elif direction == "RIGHT":
                 self.x += 10  # Move right
+           
             #if player goes to the edge, don't allow it to go any further
             if self.x < 0:
                 self.x = 0
@@ -437,15 +638,20 @@ class AIHelper(Player):
         super().__init__(x, y, health, image, dead_image)
         self.shoot_cooldown = 0
 
-    def update(self, enemies, screen):
+    def update(self, enemies, bosses, screen):
         # Implement AI movement towards the nearest enemy or strategic positioning
         self.move_automatically(enemies)
         # Implement AI shooting logic
         if self.shoot_cooldown <= 0:
-            self.shoot(enemies, screen)
+            self.shoot(enemies, bosses, screen)
             self.shoot_cooldown = 50  # Adjust cooldown based on desired shooting frequency
         else:
             self.shoot_cooldown -= 1
+
+    def jump(self):
+         #same jump as player
+        if not self.dead and self.jumping:
+            self.y -= 200 # Move up
 
     def move_automatically(self, enemies):
         # Example: Move towards the nearest enemy
@@ -464,18 +670,37 @@ class AIHelper(Player):
                     self.x = 0
                 elif self.x > screen.get_width() - self.image.get_width():
                     self.x = screen.get_width() - self.image.get_width()
+
+        #if jump timer is up, jump
+        if self.jumping:
+            self.jump()
                 
 
-    def shoot(self, enemies, screen):
+    def shoot(self, enemies, bosses, screen):
         # Example: Shoot a laser towards the nearest enemy
-        print("AI shooting")
+        #print("AI shooting")
         for enemy in enemies:
             if enemy.dead:
                 enemies.remove(enemy)
 
+        
+        # First, check if there is a boss to shoot at
+        if bosses:
+            # Assuming bosses is a list but contains only one active boss at any time
+            boss = next((boss for boss in bosses if not boss.defeated and boss.level == level), None)
+            if boss:
+                # Boss is present and not defeated
+                pygame.draw.line(screen, (0, 255, 0), (self.x, self.y), (boss.pos_x, boss.pos_y), 2)
+                # Check if within range and apply damage
+                if (boss.pos_x - self.x) ** 2 + (boss.pos_y - self.y) ** 2 < 400**2:
+                    boss.take_damage(10)  # Example damage value
+                return  # Exit the method after handling the boss
+
+
+
         if enemies:
-            print("AI shooting at enemy")
-            print("AI position", self.x, self.y)
+            #print("AI shooting at enemy")
+            #print("AI position", self.x, self.y)
             nearest_enemy = min(enemies, key=lambda enemy: (enemy.x - self.x) ** 2 + (enemy.y - self.y) ** 2)
             pygame.draw.line(screen, (0, 255, 0), (self.x, self.y), (nearest_enemy.x, nearest_enemy.y), 2)
             # Implement logic to reduce health of the hit enemy
@@ -500,14 +725,39 @@ boss = None
 # Set the game loop
 running = True
 level = 0
+level = 8
 
 # Initialize a variable to store the target position for the laser
 laser_target = None
 
 laser_line_duration = 0
 
+#add ai jumping timer
+ai_jumping_timer = 0
+
 while running:
     current_time = time.time()
+    #if player is on the ground, set jumping to false
+    if player.y == screen.get_height() - player.image.get_height():
+        player.jumping = False
+
+    ai_jumping_timer += 1
+    if ai_jumping_timer >= 500:
+        ai_jumping_timer = 0
+        for ai_helper in ai_helpers:
+            ai_helper.jumping = True
+    else:
+        for ai_helper in ai_helpers:
+            ai_helper.jumping = False
+
+
+    #ai jumping based on timer
+    for ai_helper in ai_helpers:
+        if ai_helper.jumping:
+            ai_helper.jump()
+        else: #gravity pulls them down (if not a bottom)
+            if ai_helper.y < screen.get_height() - ai_helper.image.get_height():
+                ai_helper.y += 10
 
     # Continuous key press handling
     keys = pygame.key.get_pressed()
@@ -515,6 +765,14 @@ while running:
         player.move("LEFT")
     if keys[pygame.K_RIGHT]:
         player.move("RIGHT")
+    #space bar to jump
+    if keys[pygame.K_SPACE] and not player.jumping:
+        player.jump()
+        player.jumping = True
+
+    else: #gravity pulls them down (if not a bottom)
+        if player.y < screen.get_height() - player.image.get_height():
+            player.y += 10
 
     screen.fill((255, 255, 255))  # Clear the screen
 
@@ -532,8 +790,25 @@ while running:
             screen.blit(text, (width // 2, height // 2))
             pygame.display.update()
             time.sleep(3)
-            level = 1
-            continue
+            isLevelXA = True
+            level += 1
+            
+    
+    # Example integration within the game loop
+
+    if isLevelXA:  # Check if the current level is 8
+        if not any(boss.level >= 8 for boss in all_bosses):  # Ensure "The Dark Master" isn't already spawned
+            # Position where "The Dark Master" should appear
+            screen_width, screen_height = screen.get_size()
+            dark_master_position = (screen_width // 2, 10)
+            
+            # Create "The Dark Master"
+            the_dark_master = TheDarkMaster(dark_master_parts, dark_master_position)
+            
+            all_bosses.append(the_dark_master)  # Add "The Dark Master" to the bosses list
+        
+        # Additional code to handle "The Dark Master" behavior, drawing, etc.
+
 
 
     # Display level selection or gameplay based on level value
@@ -547,6 +822,10 @@ while running:
         # Gameplay drawing: player, enemies, and optionally the laser line
         font = pygame.font.Font(None, 36)
         text = font.render(f"Level {level}", True, (0, 0, 0))
+        if level != 9:
+            text = font.render(f"Level {level}", True, (0, 0, 0))
+        else:
+            text = font.render(f"Level XA", True, (0, 0, 0))
         screen.blit(text, (width // 2, 0))
 
         if laser_target and laser_line_duration > 0:  # Draw the laser line if a target is set and duration is positive
@@ -559,6 +838,8 @@ while running:
             enemy.draw(screen)
 
         for boss in all_bosses:
+            if level == 7 and boss.level == 7 and boss.defeated:
+                level_7_boss_defeated = True
             if not boss.defeated:
                 boss.update(player)  # Update only if the boss is not defeated
             boss.draw(screen)  # Draw every boss, including defeated ones
@@ -571,7 +852,7 @@ while running:
 
         # Update and draw AI helpers
         for ai_helper in ai_helpers:
-            ai_helper.update(enemies, screen)
+            ai_helper.update(enemies, all_bosses, screen)
             ai_helper.draw(screen)
 
 
@@ -597,7 +878,7 @@ while running:
             laser_target = pygame.mouse.get_pos()  # Set the laser target
             laser_line_duration = 50  # Example: Show line for 5 frames
 
-            print("Shoot laser")
+            #print("Shoot laser")
             # Assuming the player's laser starts from the middle of the player image
             laser_start = (player.x + player.image.get_width() // 2, player.y)
 
@@ -622,7 +903,15 @@ while running:
             enemy.move_towards_player(player)
             enemy.attack_player(player)
 
-    if all(enemy.dead for enemy in enemies) and level >= 2 and level <= 7:
+    if level > 1: 
+        #check for number of ai helpers
+        if len(ai_helpers) < level:
+            ai_x_position = player.x + random.randint(-400, 400)  # Adjust for closer positioning
+            ai_y_position = player.y + random.randint(-50, 50)  # Adjust for closer positioning
+            ai_helper = AIHelper(ai_x_position, ai_y_position, 5, laser_image, laser_dead_image)
+            ai_helpers.append(ai_helper)
+
+    if (all(enemy.dead for enemy in enemies) and level >= 1 and level <= 6) or level == 7 and not level_7_boss_defeated :
     # This condition ensures a new boss is spawned for levels 2 to 7
 
         # Check if the boss for the next level has already been spawned
@@ -636,15 +925,37 @@ while running:
 
 
     # Inside the game loop, after updating and drawing everything
-    if level > 0 and all(enemy.dead for enemy in enemies) and all(boss.defeated for boss in all_bosses if boss.level == level):
+    if level > 0 and level < 7 and all(enemy.dead for enemy in enemies) and all(boss.defeated for boss in all_bosses if boss.level == level):
         level += 1  # Increment the level
         reset_or_populate_enemies(enemies, level, populate_new_level=True)  # Populate new level with enemies
 
-        # Add a new AI helper at the start of each new level
-        ai_x_position = player.x + random.randint(-100, 100)  # Adjust for closer positioning
-        ai_y_position = player.y + random.randint(-50, 50)  # Adjust for closer positioning
-        ai_helper = AIHelper(ai_x_position, ai_y_position, 5, laser_image, laser_dead_image)
-        ai_helpers.append(ai_helper)
+       
+
+    elif level == 7 and level_7_boss_defeated:
+        spider_ready = True
+        if not spider_already_spawned:
+            reset_or_populate_enemies(enemies, level, populate_new_level=True)  # Populate new level with enemies
+        #spider is defeated, print mission accomplished
+        if all(enemy.dead for enemy in enemies):
+            # Display mission accomplished
+            font = pygame.font.Font(None, 36)
+            text = font.render(f"Mission Accomplished", True, (0, 0, 0))
+            screen.blit(text, (width // 2, height // 2))
+            pygame.display.update()
+            time.sleep(3)
+            level += 1
+    elif level == 8:
+        isLevelXA = True
+        level += 1
+    
+    
+    if isLevelXA:
+        the_dark_master.update(player)
+        the_dark_master.draw(screen)  # Draw "The Dark Master" with its current state
+
+    
+
+
 
 
 
